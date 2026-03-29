@@ -31,7 +31,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
  * - O status é atualizado via polling.
  */
 
-const API_BASE_URL = ""; // Ex.: "http://localhost:8000". Deixe vazio para mesma origem.
+const API_BASE_URL = "http://localhost:8000"; // Ex.: "http://localhost:8000". Deixe vazio para mesma origem.
 const POLLING_INTERVAL_MS = 3000;
 const MAX_AUTO_RETRIES = 2;
 
@@ -160,7 +160,7 @@ function uploadVideo({ file, onProgress }) {
     const formData = new FormData();
     formData.append("file", file);
 
-    xhr.open("POST", buildUrl("/upload"));
+    xhr.open("POST", buildUrl("/api/v1/videos/upload/"));
     xhr.responseType = "json";
 
     xhr.upload.onprogress = (event) => {
@@ -178,12 +178,18 @@ function uploadVideo({ file, onProgress }) {
       }
 
       const data = xhr.response;
-      if (!data?.video_id) {
-        reject(new Error("Resposta inválida da API. Campo video_id não encontrado."));
+      const normalizedData = {
+        video_id: data?.video_id || data?.id,
+        status: data?.status,
+        message: data?.message,
+      };
+
+      if (!normalizedData.video_id) {
+        reject(new Error("Resposta inválida da API. Campo id/video_id não encontrado."));
         return;
       }
 
-      resolve(data);
+      resolve(normalizedData);
     };
 
     xhr.onerror = () => reject(new Error("Erro de rede durante o upload."));
@@ -194,7 +200,7 @@ function uploadVideo({ file, onProgress }) {
 }
 
 async function fetchStatus(videoId) {
-  const response = await fetch(buildUrl(`/status/${videoId}`), {
+  const response = await fetch(buildUrl(`/api/v1/videos/${videoId}`), {
     method: "GET",
     headers: { Accept: "application/json" },
   });
@@ -258,7 +264,11 @@ export default function VideoUploadProcessor() {
     async (id) => {
       try {
         const data = await fetchStatus(id);
-        const normalizedStatus = String(data?.status || "processing").toLowerCase();
+        const rawStatus = String(data?.status || "processing").toLowerCase();
+
+        const normalizedStatus =
+          rawStatus === "pending" ? "processing" : rawStatus;
+
         setBackendStatus(normalizedStatus);
 
         if (normalizedStatus === "completed") {
@@ -293,12 +303,12 @@ export default function VideoUploadProcessor() {
 
         setUiState(UI_STATE.PROCESSING);
         setStatusMessage(data?.message || "Seu vídeo está sendo processado.");
-      } catch (err) {
-        setError(err.message || "Erro ao consultar status.");
-      }
-    },
-    [file, resetPolling, showToast]
-  );
+              } catch (err) {
+                setError(err.message || "Erro ao consultar status.");
+              }
+            },
+            [file, resetPolling, showToast]
+          );
 
   const startPolling = useCallback(
     (id) => {
@@ -312,31 +322,58 @@ export default function VideoUploadProcessor() {
   );
 
   const startUpload = useCallback(
-    async (selectedFile, isRetry = false) => {
+    async (selectedFile: File, isRetry = false) => {
       try {
         setError("");
         setBackendStatus(null);
         setUiState(UI_STATE.UPLOADING);
         setStatusMessage(isRetry ? "Reenviando vídeo..." : "Enviando vídeo...");
         setUploadProgress(0);
+
         if (!isRetry) setVideoId("");
 
-        const data = await uploadVideo({
+        const data: any = await uploadVideo({
           file: selectedFile,
-          onProgress: (value) => setUploadProgress(value),
+          onProgress: (value: number) => setUploadProgress(value),
         });
 
-        setVideoId(data.video_id);
+        // ✅ Ajuste principal: aceitar id OU video_id
+        const returnedId = data.video_id || data.id;
+
+        if (!returnedId) {
+          throw new Error("Resposta inválida da API: id não encontrado.");
+        }
+
+        // ✅ Normalização de status
+        const rawStatus = String(data?.status || "processing").toLowerCase();
+        const normalizedStatus =
+          rawStatus === "pending" ? "processing" : rawStatus;
+
+        setVideoId(returnedId);
         setUiState(UI_STATE.PROCESSING);
-        setBackendStatus("processing");
-        setStatusMessage("Upload concluído. Iniciando processamento...");
-        showToast("success", "Upload concluído", "Agora estamos acompanhando o processamento do vídeo.");
-        startPolling(data.video_id);
-      } catch (err) {
+        setBackendStatus(normalizedStatus);
+        setStatusMessage(
+          data?.message || "Upload concluído. Iniciando processamento..."
+        );
+
+        showToast(
+          "success",
+          "Upload concluído",
+          "Agora estamos acompanhando o processamento do vídeo."
+        );
+
+        // ✅ Polling com ID correto
+        startPolling(returnedId);
+      } catch (err: any) {
         setUiState(UI_STATE.FAILED);
-        setError(err.message || "Falha ao enviar o vídeo.");
+        setError(err?.message || "Falha ao enviar o vídeo.");
         setStatusMessage("Não foi possível concluir o upload.");
-        showToast("error", "Erro no upload", err.message || "Falha inesperada durante o envio.");
+
+        showToast(
+          "error",
+          "Erro no upload",
+          err?.message || "Falha inesperada durante o envio."
+        );
       }
     },
     [showToast, startPolling]
@@ -398,7 +435,7 @@ export default function VideoUploadProcessor() {
 
   const handleDownload = useCallback(() => {
     if (!videoId) return;
-    window.open(buildUrl(`/download/${videoId}`), "_blank", "noopener,noreferrer");
+    window.open(buildUrl(`/api/v1/videos/download/${videoId}`), "_blank", "noopener,noreferrer");
   }, [videoId]);
 
   useEffect(() => {

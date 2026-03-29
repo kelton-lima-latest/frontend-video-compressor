@@ -1,11 +1,13 @@
+version: "3.9"
+
 services:
   frontend:
     build:
-      context: .                   # O contexto agora é a raiz (onde está o package.json)
-      dockerfile: docker/Dockerfile # Caminho para o arquivo de receita
-    container_name: video_compressor_ui
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    container_name: video-upload-frontend
     ports:
-      - "3000:80"
-    environment:
-      - VITE_API_URL=http://localhost:8000/api/v1
-    restart: always
+      - "3000:8080"
+    restart: unless-stopped
