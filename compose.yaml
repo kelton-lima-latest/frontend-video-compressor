@@ -1,0 +1,11 @@
+services:
+  frontend:
+    build:
+      context: .                   # O contexto agora é a raiz (onde está o package.json)
+      dockerfile: docker/Dockerfile # Caminho para o arquivo de receita
+    container_name: video_compressor_ui
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+    restart: always
